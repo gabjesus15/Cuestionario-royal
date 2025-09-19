@@ -1,2 +1,2 @@
-# Cuestionario-royal-2
+# Cuestionario-royal
 cuestionarios
