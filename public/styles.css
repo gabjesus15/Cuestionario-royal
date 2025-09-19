@@ -27,7 +27,7 @@ body {
 }
 
 h1,h2,h3 { margin: 0 0 12px; }
-h1 { font-size: 2rem; background: var(--accent); -webkit-background-clip: text; color: transparent; }
+h1 { font-size: 2rem; background: var(--accent); -webkit-background-clip: text; background-clip: text; color: transparent; }
 h2 { font-size: 1.6rem; }
 p.muted { color: #cbd5e1; }
 
