@@ -1,31 +1,5 @@
-import { firebaseConfig } from "./firebase.js";
-import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-app.js";
-import {
-  getAuth, signInAnonymously, onAuthStateChanged, setPersistence, browserLocalPersistence
-} from "https://www.gstatic.com/firebasejs/11.0.1/firebase-auth.js";
-import {
-  getFirestore, doc, onSnapshot, getDoc
-} from "https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js";
-import {
-  getFunctions, httpsCallable, connectFunctionsEmulator
-} from "https://www.gstatic.com/firebasejs/11.0.1/firebase-functions.js";
+// Implementación local en memoria (sin base de datos)
 
-// --- Inicialización ---
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db = getFirestore(app);
-
-// Ajusta la región a la que desplegaste tus Functions (por defecto "us-central1")
-const functions = getFunctions(app, "us-central1");
-
-// === OPCIONAL: EMULADORES EN DEV ===
-// if (location.hostname === "localhost") {
-//   // Puerto por defecto Functions: 5001
-//   connectFunctionsEmulator(functions, "localhost", 5001);
-//   // Para Firestore/Auth usa connectFirestoreEmulator / connectAuthEmulator si lo requieres
-// }
-
-// --- Utilidades ---
 function normalizeRoomCode(code) {
   return String(code || "").trim().toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 8);
 }
@@ -33,84 +7,105 @@ function normalizeName(name) {
   return String(name || "").trim().slice(0, 40);
 }
 
-// Mantiene sesión anónima, persistente en el navegador
-export async function ensureSignedIn() {
-  await setPersistence(auth, browserLocalPersistence);
-  return new Promise((resolve, reject) => {
-    onAuthStateChanged(auth, async (u) => {
-      try {
-        if (!u) {
-          const cred = await signInAnonymously(auth);
-          resolve(cred.user);
-        } else {
-          resolve(u);
-        }
-      } catch (e) { reject(e); }
-    });
-  });
+const roomStore = new Map();
+
+function generateCode() {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  let s = "";
+  for (let i = 0; i < 6; i++) s += chars[Math.floor(Math.random() * chars.length)];
+  return s;
 }
 
-// --- Callables con manejo de errores uniforme ---
-const _createRoomSecure = httpsCallable(functions, "createRoomSecure");
-const _joinRoomSecure   = httpsCallable(functions, "joinRoomSecure");
-const _addAIPlayer      = httpsCallable(functions, "addAIPlayer");
-const _startGameSecure  = httpsCallable(functions, "startGameSecure");
-
-async function callSafe(fn, payload) {
-  try {
-    const res = await fn(payload);
-    return res?.data;
-  } catch (err) {
-    // Mapea errores comunes de httpsCallable
-    const msg = err?.message || err?.details || "Error de red o permisos.";
-    throw new Error(msg);
+function getUserId() {
+  const key = "royal_local_uid";
+  let uid = localStorage.getItem(key);
+  if (!uid) {
+    uid = Math.random().toString(36).slice(2, 10);
+    localStorage.setItem(key, uid);
   }
+  return uid;
 }
 
-// --- API pública ---
+export async function ensureSignedIn() {
+  return { uid: getUserId() };
+}
+
 export async function createRoom(playerName, avatar) {
-  await ensureSignedIn();
   const name = normalizeName(playerName);
   if (!name) throw new Error("El nombre es requerido.");
-  const data = await callSafe(_createRoomSecure, { playerName: name, avatar: avatar || "🚀" });
-  return data; // { roomCode }
+  let code = generateCode();
+  while (roomStore.has(code)) code = generateCode();
+  const createdBy = getUserId();
+  const room = {
+    code,
+    createdBy,
+    status: "waiting",
+    players: [
+      { id: createdBy, name, avatar: avatar || "🚀", role: "host", isReady: true }
+    ]
+  };
+  roomStore.set(code, room);
+  notify(code);
+  return { roomCode: code };
 }
 
 export async function joinRoom(roomCode, playerName, avatar) {
-  await ensureSignedIn();
   const code = normalizeRoomCode(roomCode);
   const name = normalizeName(playerName);
-  if (!name || !code) throw new Error("Nombre y código son requeridos.");
-  return await callSafe(_joinRoomSecure, { roomCode: code, playerName: name, avatar: avatar || "🎯" });
+  const uid = getUserId();
+  if (!roomStore.has(code)) throw new Error("Sala no existe.");
+  const room = roomStore.get(code);
+  if (room.players.length >= 2) throw new Error("Sala llena.");
+  if (!name) throw new Error("El nombre es requerido.");
+  if (!room.players.find(p => p.id === uid)) {
+    room.players.push({ id: uid, name, avatar: avatar || "🎯", role: "guest", isReady: true });
+  }
+  notify(code);
+  return { ok: true };
 }
 
 export async function addAI(roomCode) {
-  await ensureSignedIn();
   const code = normalizeRoomCode(roomCode);
-  if (!code) throw new Error("Código requerido.");
-  return await callSafe(_addAIPlayer, { roomCode: code });
+  const room = roomStore.get(code);
+  if (!room) throw new Error("Sala no existe.");
+  if (room.players.length >= 2) throw new Error("Sala llena.");
+  room.players.push({ id: "ai", name: "IA", avatar: "🤖", role: "ai", isReady: true });
+  notify(code);
+  return { ok: true };
 }
 
 export async function startGame(roomCode) {
-  await ensureSignedIn();
   const code = normalizeRoomCode(roomCode);
-  if (!code) throw new Error("Código requerido.");
-  return await callSafe(_startGameSecure, { roomCode: code });
+  const room = roomStore.get(code);
+  if (!room) throw new Error("Sala no existe.");
+  room.status = "in_progress";
+  notify(code);
+  return { ok: true };
 }
 
-// Suscripción en tiempo real; devuelve función para desuscribirse
+const listeners = new Map();
+function notify(code) {
+  const lset = listeners.get(code);
+  if (!lset) return;
+  const room = roomStore.get(code);
+  for (const cb of lset) cb(room ? { ...room } : null);
+}
+
 export function subscribeRoom(roomCode, cb) {
   const code = normalizeRoomCode(roomCode);
-  const ref = doc(db, "rooms", code);
-  return onSnapshot(ref, (snap) => cb(snap.data()));
+  let lset = listeners.get(code);
+  if (!lset) listeners.set(code, (lset = new Set()));
+  lset.add(cb);
+  cb(roomStore.get(code) ? { ...roomStore.get(code) } : null);
+  return () => {
+    lset.delete(cb);
+    if (lset.size === 0) listeners.delete(code);
+  };
 }
 
-// Lectura puntual del room (útil para comprobaciones sin iniciar listener)
 export async function getRoomOnce(roomCode) {
   const code = normalizeRoomCode(roomCode);
-  const snap = await getDoc(doc(db, "rooms", code));
-  return snap.exists() ? snap.data() : null;
+  const room = roomStore.get(code);
+  return room ? { ...room } : null;
 }
 
-// Re-export útiles por si te sirven en otras partes
-export { auth, db };

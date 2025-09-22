@@ -7,7 +7,7 @@ const state = {
   mode: "home",          // "home" | "create" | "join"
   playerName: "",
   roomCode: "",
-  room: null,            // documento de Firestore
+  room: null,
   isHost: false,
   loading: false,
   avatars: ["🎯","⚡","🏆","🔥","💎","🚀","🎪","🌟"]
@@ -28,7 +28,7 @@ function renderHome() {
       <div class="center">
         <div class="pill mt-2">⚔️ Modo Batalla 1v1</div>
         <h1 class="mt-4">Desafía a un amigo</h1>
-        <p class="muted">Todo en tiempo real con Firestore</p>
+        <p class="muted">Todo en tiempo real</p>
       </div>
 
       <div class="mt-6 grid">
