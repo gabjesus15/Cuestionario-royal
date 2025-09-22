@@ -22,7 +22,7 @@ body {
 .container { max-width: 860px; margin: 40px auto; padding: 16px; }
 .card {
   background: var(--card); border: 1px solid rgba(255,255,255,.15);
-  border-radius: 20px; padding: 24px; backdrop-filter: blur(8px);
+  border-radius: 20px; padding: 24px; backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
   box-shadow: 0 10px 30px rgba(0,0,0,.35);
 }
 

@@ -52,8 +52,46 @@ export function subscribeGame(code, cb) {
 }
 
 export async function submitAnswer(code, qIndex, uid, answerIndex) {
+  // 1) Registrar respuesta
   const answerRef = ref(database, `games/${code}/answers/${qIndex}/${uid}`);
   await set(answerRef, { answer: answerIndex, ts: serverTimestamp() });
+
+  // 2) Cierre anticipado si TODOS los humanos respondieron
+  //    (tolerante a carreras: closeQuestionAsHost usa transacción y solo avanza si phase==='question')
+  try {
+    // Leemos jugadores humanos y estado actual del juego
+    const [playersSnap, gameSnap] = await Promise.all([
+      get(ref(database, `rooms/${code}/players`)),
+      get(ref(database, `games/${code}`)),
+    ]);
+    if (!gameSnap.exists()) return;
+
+    const g = gameSnap.val();
+    if (g.phase !== 'question') return;
+
+    const currentIndex = Number.isInteger(g.currentIndex) ? g.currentIndex : 0;
+    if (currentIndex !== qIndex) return; // por si llegara tarde
+
+    const players = playersSnap.exists() ? playersSnap.val() : {};
+    const humanIds = Object.values(players || {})
+      .filter(p => p && p.role !== 'ai')
+      .map(p => p.id)
+      .filter(Boolean);
+
+    // Respuestas de esta pregunta
+    const ansSnap = await get(ref(database, `games/${code}/answers/${qIndex}`));
+    const answers = ansSnap.exists() ? ansSnap.val() : {};
+    const answeredHumanIds = Object.entries(answers)
+      .filter(([, a]) => a && Number.isInteger(a.answer))
+      .map(([uid]) => uid);
+
+    const allAnswered = humanIds.length > 0 && humanIds.every(id => answeredHumanIds.includes(id));
+    if (allAnswered) {
+      await closeQuestionAsHost(code);
+    }
+  } catch (e) {
+    console.warn('Early-close check failed:', e);
+  }
 }
 
 export async function closeQuestionAsHost(code) {

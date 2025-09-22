@@ -34,9 +34,22 @@ export function renderLobby(container, state) {
         `).join('')}
       </div>
 
-      <div class="row mt-4">
+      <div class="row mt-4" style="align-items:center; gap:12px; flex-wrap:wrap;">
         <button id="copyCodeBtn" class="button">📋 Copiar código</button>
+
         <button id="addAIBtn" class="button" style="display:${canAddAI ? 'inline-flex' : 'none'}">🤖 Agregar IA</button>
+
+        <!-- Selector de duración global -->
+        <label class="pill" for="durationSelect" style="display:${state.isHost ? 'inline-block' : 'none'}">
+          ⏱️ Duración por pregunta:&nbsp;
+          <select id="durationSelect" class="input" style="height:36px; width:auto; padding:0 10px;">
+            <option value="10000">10s</option>
+            <option value="15000" selected>15s</option>
+            <option value="30000">30s</option>
+            <option value="45000">45s</option>
+          </select>
+        </label>
+
         <button id="startGameBtn" class="button accent" style="display:${canStart ? 'inline-flex':'none'}">🚀 ¡Comenzar!</button>
       </div>
     </div>
@@ -45,6 +58,7 @@ export function renderLobby(container, state) {
   const copyBtn  = document.getElementById('copyCodeBtn');
   const startBtn = document.getElementById('startGameBtn');
   const addBtn   = document.getElementById('addAIBtn');
+  const durationSelect = document.getElementById('durationSelect');
 
   if (copyBtn) {
     copyBtn.onclick = async () => {
@@ -67,7 +81,8 @@ export function renderLobby(container, state) {
       e?.preventDefault?.();
       if (!state.isHost) return alert('Solo el anfitrión puede iniciar.');
       try {
-        await startMatch(state.roomCode, toSealedQuestions(DEFAULT_QUESTIONS), 30000);
+        const durationMs = Number(durationSelect?.value || 30000);
+        await startMatch(state.roomCode, toSealedQuestions(DEFAULT_QUESTIONS), durationMs);
         // El subscribe redirige al ver in_progress
       } catch (err) {
         console.warn('startMatch falló, intentando startGame...', err?.message);

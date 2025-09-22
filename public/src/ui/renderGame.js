@@ -40,10 +40,12 @@ function bindEvents(root) {
       if (!canStart) return alert('Solo el anfitrión y con 2 jugadores pueden iniciar.');
 
       try {
+        // Fallback desde la vista de juego: usa un default sensato (30s).
+        // La duración “global” se configura desde el lobby.
         await startMatch(
           gameState.roomCode,
           toSealedQuestions(DEFAULT_QUESTIONS),
-          10000   // misma duración por pregunta que en el lobby
+          30000
         );
         // No hace falta redirigir: la suscripción a /games lo detecta
       } catch (err) {
