@@ -1,243 +1,275 @@
-import { ensureSignedIn, createRoom, joinRoom, addAI, startGame, subscribeRoom } from "./lobbyService.js";
+// app.js — Lobby SPA con botón "Agregar IA" y renderHome minimalista (versión anterior)
+import {
+  ensureSignedIn,
+  createRoom,
+  joinRoom,
+  startMatch,
+  startGame,
+  subscribeRoom,
+  getRoomOnce,
+  addAI,                // 👈 usamos la IA del lobbyService (ya implementada)
+} from './lobbyService.js';
+import { ensureAuthenticated } from './firebase.js';
 
-const view = document.getElementById("view");
-
-// Estado local mínimo
 const state = {
-  mode: "home",          // "home" | "create" | "join"
-  playerName: "",
-  roomCode: "",
+  currentUser: null,
+  roomCode: null,
   room: null,
+  unsubRoom: null,
   isHost: false,
-  loading: false,
-  avatars: ["🎯","⚡","🏆","🔥","💎","🚀","🎪","🌟"]
 };
 
-const rndAvatar = () => state.avatars[Math.floor(Math.random()*state.avatars.length)];
+// Mismo set que en game.js para fallback/legacy
+const DEFAULT_QUESTIONS = [
+  { questionIndex: 0, category: "Geografía",  text: "¿Cuál es la capital de Francia?", options: ["Londres","París","Madrid","Roma"], correctIndex: 1 },
+  { questionIndex: 1, category: "Historia",   text: "¿En qué año llegó el hombre a la Luna?", options: ["1967","1969","1971","1973"], correctIndex: 1 },
+  { questionIndex: 2, category: "Ciencia",    text: "¿Cuál es el planeta más grande del sistema solar?", options: ["Saturno","Neptuno","Júpiter","Urano"], correctIndex: 2 },
+  { questionIndex: 3, category: "Literatura", text: "¿Quién escribió 'Don Quijote de la Mancha'?", options: ["Lope de Vega","Miguel de Cervantes","Federico García Lorca","Calderón de la Barca"], correctIndex: 1 },
+  { questionIndex: 4, category: "Geografía",  text: "¿Cuál es el océano más grande del mundo?", options: ["Atlántico","Índico","Ártico","Pacífico"], correctIndex: 3 },
+];
 
-// Renderiza según estado
-function render() {
-  if (state.mode === "create") return renderCreate();
-  if (state.mode === "join")   return renderJoin();
-  return renderHome();
+document.addEventListener('DOMContentLoaded', init);
+
+async function init() {
+  try {
+    state.currentUser = await ensureAuthenticated();
+  } catch (e) {
+    console.error('No se pudo autenticar:', e);
+    alert('Error de autenticación');
+    return;
+  }
+
+  hydrateFromQuery();
+  renderHome();
+
+  if (state.roomCode) {
+    await enterLobby(state.roomCode);
+  }
 }
 
+// ---------- Render raíz (versión anterior, minimalista) ----------
 function renderHome() {
+  const view = document.getElementById('view');
+  if (!view) return;
+
   view.innerHTML = `
     <div class="card">
-      <div class="center">
-        <div class="pill mt-2">⚔️ Modo Batalla 1v1</div>
-        <h1 class="mt-4">Desafía a un amigo</h1>
-        <p class="muted">Todo en tiempo real</p>
+      <h1>👑 Royal Trivia</h1>
+      <p class="muted mt-2">Crea una sala o únete con un código.</p>
+
+      <div class="grid cols-2 mt-6">
+        <form id="createForm" class="grid">
+          <h2>Crear sala</h2>
+          <input id="playerName" class="input" placeholder="Tu nombre" required />
+          <button class="button primary" type="submit">Crear</button>
+        </form>
+
+        <form id="joinForm" class="grid">
+          <h2>Unirse a sala</h2>
+          <input id="roomCode"  class="input" placeholder="Código de sala" required />
+          <input id="guestName" class="input" placeholder="Tu nombre" required />
+          <button class="button secondary" type="submit">Unirse</button>
+        </form>
       </div>
 
-      <div class="mt-6 grid">
-        <input id="name" class="input" placeholder="Ingresa tu nombre de guerrero" value="${escapeHtml(state.playerName)}" />
-        <div class="grid cols-2">
-          <button id="btnCreate" class="button primary">👑 Crear Sala</button>
-          <div>
-            <input id="code" class="input" placeholder="Código de sala" value="${escapeHtml(state.roomCode)}" />
-            <button id="btnJoin" class="button secondary mt-2">👥 Unirse a Batalla</button>
-          </div>
-        </div>
-      </div>
-
-      <div class="card mt-8">
-        <h2>⚡ Reglas de Combate</h2>
-        <div class="grid cols-2 mt-4">
-          ${regla("📝","5 preguntas por ronda","Batalla intensa garantizada")}
-          ${regla("⏰","30 segundos por pregunta","Piensa rápido o pierde")}
-          ${regla("🎯","+1 punto por acierto","Cada respuesta cuenta")}
-          ${regla("⚡","El más rápido gana empates","Velocidad es clave")}
-        </div>
-      </div>
+      <div id="lobbyPanel" class="mt-8"></div>
     </div>
   `;
 
-  // Wire events
-  document.getElementById("name").addEventListener("input", (e)=> state.playerName = e.target.value);
-  document.getElementById("code").addEventListener("input", (e)=> state.roomCode = e.target.value.toUpperCase());
-  document.getElementById("btnCreate").addEventListener("click", onCreate);
-  document.getElementById("btnJoin").addEventListener("click", onJoin);
+  wireHomeHandlers();
 }
 
-function renderCreate() {
-  const players = (state.room?.players)||[];
-  view.innerHTML = `
-    <div class="card">
-      <div class="center">
-        <h1>Sala de Batalla</h1>
-        <p class="muted mt-2">Código de sala</p>
-        <div class="pill mt-2" aria-live="polite">${escapeHtml(state.roomCode)}</div>
-      </div>
+// ---------- Enlaces UI de home ----------
+function wireHomeHandlers() {
+  const createForm = document.getElementById('createForm');
+  const joinForm   = document.getElementById('joinForm');
 
-      <h2 class="mt-6 center">Jugadores Conectados</h2>
-      <div class="grid mt-4">
-        ${players.map(p => playerCard(p)).join("")}
-      </div>
+  if (createForm) {
+    createForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const name = document.getElementById('playerName').value.trim();
+      try {
+        // Avatar por defecto lo pone lobbyService si no se pasa
+        const { roomCode } = await createRoom(name);
+        await enterLobby(roomCode);
+      } catch (err) {
+        console.error(err);
+        alert(err.message || 'No se pudo crear la sala');
+      }
+    });
+  }
 
-      ${players.length === 1 && state.isHost ? `
-        <div class="card mt-6 center">
-          <p class="muted">Esperando al segundo jugador...</p>
-          <button id="btnAI" class="button secondary mt-4">🤖 Jugar vs IA Avanzada</button>
-        </div>` : ``}
-
-      ${players.length === 2 && state.isHost ? `
-        <button id="btnStart" class="button accent mt-6">🎯 ¡Comenzar Batalla!</button>` : ``}
-    </div>
-  `;
-
-  // Wire
-  const ai = document.getElementById("btnAI");
-  if (ai) ai.addEventListener("click", onAddAI);
-
-  const start = document.getElementById("btnStart");
-  if (start) start.addEventListener("click", onStartGame);
+  if (joinForm) {
+    joinForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const code = document.getElementById('roomCode').value.trim().toUpperCase();
+      const name = document.getElementById('guestName').value.trim();
+      try {
+        // Avatar por defecto lo pone lobbyService si no se pasa
+        await joinRoom(code, name);
+        await enterLobby(code);
+      } catch (err) {
+        console.error(err);
+        alert(err.message || 'No se pudo unir a la sala');
+      }
+    });
+  }
 }
 
-function renderJoin() {
-  const players = (state.room?.players)||[];
-  view.innerHTML = `
-    <div class="card">
-      <div class="center">
-        <h1>¡Conectado!</h1>
-        <p class="muted mt-2">Sala</p>
-        <div class="pill mt-2">${escapeHtml(state.roomCode)}</div>
-      </div>
+// ---------- Lobby ----------
+async function enterLobby(code) {
+  cleanupRoomSub();
 
-      <div class="grid mt-6">
-        ${players.map(p => playerCard(p)).join("")}
-      </div>
+  state.roomCode = code;
+  const room = await getRoomOnce(code);
+  if (!room) {
+    alert('La sala no existe o ha expirado');
+    return;
+  }
+  state.room = room;
+  state.isHost = room.createdBy === state.currentUser?.uid;
 
-      <div class="card mt-6 center">
-        <p class="muted">Esperando que el anfitrión inicie la partida...</p>
-        <div class="pill mt-2">⏳</div>
-      </div>
-    </div>
-  `;
+  renderLobby(room);
+
+  state.unsubRoom = subscribeRoom(code, (next) => {
+    if (!next) {
+      console.warn('Sala eliminada');
+      renderLobbyGone();
+      return;
+    }
+    state.room = next;
+    state.isHost = next.createdBy === state.currentUser?.uid;
+    renderLobby(next);
+
+    if (next.status === 'in_progress') {
+      goToGame(code);
+    }
+  });
 }
 
-function playerCard(p) {
-  const role = p.role === "host" ? "Anfitrión" : (p.role === "ai" ? "IA" : "Invitado");
-  return `
+function renderLobby(room) {
+  const panel = document.getElementById('lobbyPanel');
+  if (!panel) return;
+
+  const players = room.players ? Object.values(room.players) : [];
+  const humans  = players.filter(p => p.role !== 'ai');
+  const hasAI   = players.some(p => p.role === 'ai');
+
+  const canStart = state.isHost && humans.length >= 2;
+  const canAddAI = state.isHost && humans.length < 2 && !hasAI;
+
+  panel.innerHTML = `
     <div class="card">
       <div class="row">
-        <div class="player">
-          <div class="avatar">${p.avatar}</div>
-          <div>
-            <strong>${escapeHtml(p.name)}</strong><br/>
-            <small class="muted">${role}</small>
+        <div class="pill">Sala: <strong>${escapeHtml(room.code)}</strong></div>
+        <div class="pill">Estado: <strong>${escapeHtml(room.status)}</strong></div>
+      </div>
+
+      <div class="players-info">
+        ${players.map(p => `
+          <div class="player-card">
+            <span class="avatar">${p.avatar || '🙂'}</span>
+            <strong>${escapeHtml(p.name || 'Jugador')}</strong>
+            ${p.role === 'host' ? '<small style="color:#fbbf24">👑 Anfitrión</small>' : ''}
+            ${p.online === false ? '<small class="muted">(offline)</small>' : ''}
+            ${p.role === 'ai' ? '<small class="muted">🤖 IA</small>' : ''}
           </div>
-        </div>
-        <div class="row" style="gap:8px;">
-          ${p.role==="host" ? `<span class="pill">👑</span>` : ``}
-          <span class="dot ${p.isReady ? "ok":""}"></span>
-        </div>
+        `).join('')}
       </div>
+
+      <div class="row mt-4">
+        <button id="copyCodeBtn" class="button">📋 Copiar código</button>
+        <button id="addAIBtn" class="button" style="display:${canAddAI ? 'inline-flex' : 'none'}">🤖 Agregar IA</button>
+        <button id="startGameBtn" class="button accent" style="display:${canStart ? 'inline-flex':'none'}">🚀 ¡Comenzar!</button>
+      </div>
+    </div>
+  `;
+
+  const copyBtn  = document.getElementById('copyCodeBtn');
+  const startBtn = document.getElementById('startGameBtn');
+  const addBtn   = document.getElementById('addAIBtn');
+
+  if (copyBtn) {
+    copyBtn.onclick = async () => {
+      try {
+        await navigator.clipboard.writeText(room.code);
+        copyBtn.textContent = '✅ Copiado';
+        setTimeout(() => (copyBtn.textContent = '📋 Copiar código'), 1200);
+      } catch {
+        alert('No se pudo copiar');
+      }
+    };
+  }
+
+  if (addBtn) {
+    addBtn.onclick = async () => {
+      try {
+        await addAI(state.roomCode);
+      } catch (err) {
+        console.error(err);
+        alert(err.message || 'No se pudo agregar la IA');
+      }
+    };
+  }
+
+  if (startBtn) {
+    startBtn.onclick = onStartClicked;
+  }
+}
+
+function renderLobbyGone() {
+  const panel = document.getElementById('lobbyPanel');
+  if (!panel) return;
+  panel.innerHTML = `
+    <div class="card center">
+      <h2>Sala no disponible</h2>
+      <p class="muted">La sala se cerró o ya no está accesible.</p>
     </div>
   `;
 }
 
-function regla(icon,t,s) {
-  return `
-    <div class="row">
-      <div class="pill" aria-hidden="true">${icon}</div>
-      <div>
-        <strong>${t}</strong><br/><small class="muted">${s}</small>
-      </div>
-    </div>
-  `;
-}
+async function onStartClicked(e) {
+  e?.preventDefault?.();
+  if (!state.isHost) return alert('Solo el anfitrión puede iniciar.');
 
-// === Handlers ===
-
-let unsub = null;
-
-async function onCreate() {
-  if (!state.playerName.trim()) return alert("Escribe tu nombre");
   try {
-    state.loading = true;
-    await ensureSignedIn();
-    const { roomCode } = await createRoom(state.playerName.trim(), rndAvatar());
-    state.roomCode = roomCode;
-    state.mode = "create";
-
-    // Suscribirse a la sala
-    if (unsub) unsub();
-    unsub = subscribeRoom(state.roomCode, (data) => {
-      state.room = data || null;
-      checkHost();
-      if (state.room?.status === "in_progress") goToGame();
-      render();
-    });
-
-    render();
-  } catch (e) {
-    console.error(e); alert(e.message || "Error al crear sala");
-  } finally {
-    state.loading = false;
+    await startMatch(state.roomCode, DEFAULT_QUESTIONS, 30000);
+    // subscribeRoom redirigirá cuando vea in_progress
+  } catch (err) {
+    console.warn('startMatch falló, intentando startGame...', err?.message);
+    try {
+      await startGame(state.roomCode);
+      goToGame(state.roomCode); // por si el subscribe tarda
+    } catch (err2) {
+      console.error(err2);
+      alert('No se pudo iniciar: ' + (err2?.message || 'error desconocido'));
+    }
   }
 }
 
-async function onJoin() {
-  if (!state.playerName.trim() || !state.roomCode.trim()) {
-    return alert("Completa nombre y código.");
-  }
-  try {
-    state.loading = true;
-    await ensureSignedIn();
-    await joinRoom(state.roomCode, state.playerName.trim(), rndAvatar());
-    state.mode = "join";
+// ---------- Navegación ----------
+function goToGame(code) {
+  window.location.href = `./game.html?code=${encodeURIComponent(code)}`;
+}
 
-    if (unsub) unsub();
-    unsub = subscribeRoom(state.roomCode, (data) => {
-      state.room = data || null;
-      checkHost();
-      if (state.room?.status === "in_progress") goToGame();
-      render();
-    });
+// ---------- Utilidades ----------
+function hydrateFromQuery() {
+  const params = new URLSearchParams(location.search);
+  const code = params.get('code');
+  if (code) state.roomCode = code.trim().toUpperCase();
+}
 
-    render();
-  } catch (e) {
-    console.error(e); alert(e.message || "No se pudo unir a la sala");
-  } finally {
-    state.loading = false;
+function cleanupRoomSub() {
+  if (state.unsubRoom) {
+    try { state.unsubRoom(); } catch {}
+    state.unsubRoom = null;
   }
 }
 
-async function onAddAI() {
-  try {
-    await addAI(state.roomCode);
-  } catch (e) {
-    console.error(e); alert(e.message || "No se pudo agregar IA");
-  }
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = String(text ?? '');
+  return div.innerHTML;
 }
 
-async function onStartGame() {
-  try {
-    await startGame(state.roomCode);
-    // El snapshot nos llevará a game.html en goToGame()
-  } catch (e) {
-    console.error(e); alert(e.message || "No se pudo iniciar la partida");
-  }
-}
-
-async function checkHost() {
-  // Determina si el usuario actual es el host
-  const user = await ensureSignedIn();
-  state.isHost = state.room?.createdBy === user.uid;
-}
-
-function goToGame() {
-  const names = (state.room?.players||[]).map(p => p.name).join(", ");
-  // Lleva datos por querystring (puedes usar sessionStorage si prefieres)
-  location.href = `./game.html?code=${encodeURIComponent(state.roomCode)}&players=${encodeURIComponent(names)}`;
-}
-
-// Helper para escapar HTML
-function escapeHtml(s) {
-  return String(s).replace(/[&<>"']/g, (m) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
-}
-
-// Inicial
-render();
+window.addEventListener('beforeunload', cleanupRoomSub);
