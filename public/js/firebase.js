@@ -1,8 +1,25 @@
 // Configuración de Firebase usando CDN
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.3.0/firebase-app.js";
 import { getAnalytics } from "https://www.gstatic.com/firebasejs/12.3.0/firebase-analytics.js";
-import { getDatabase, ref, set, get, onValue, push, remove, serverTimestamp } from "https://www.gstatic.com/firebasejs/12.3.0/firebase-database.js";
-import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.3.0/firebase-auth.js";
+import {
+  getDatabase,
+  ref,
+  set,
+  get,
+  update,          // 👈 agregado
+  runTransaction,  // 👈 agregado
+  onValue,
+  off,             // 👈 agregado
+  onDisconnect,    // 👈 agregado
+  push,
+  remove,
+  serverTimestamp
+} from "https://www.gstatic.com/firebasejs/12.3.0/firebase-database.js";
+import {
+  getAuth,
+  signInAnonymously,
+  onAuthStateChanged
+} from "https://www.gstatic.com/firebasejs/12.3.0/firebase-auth.js";
 
 // Your web app's Firebase configuration
 const firebaseConfig = {
@@ -18,11 +35,13 @@ const firebaseConfig = {
 
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
+// Analytics puede fallar en http/local; si no lo necesitas, puedes quitar esta línea.
 const analytics = getAnalytics(app);
+
 const database = getDatabase(app);
 const auth = getAuth(app);
 
-// Función para asegurar autenticación anónima
+// Autenticación anónima garantizada
 export async function ensureAuthenticated() {
   return new Promise((resolve, reject) => {
     onAuthStateChanged(auth, (user) => {
@@ -37,5 +56,20 @@ export async function ensureAuthenticated() {
   });
 }
 
-// Exportar instancias para uso en otros módulos
-export { database, auth, ref, set, get, onValue, push, remove, serverTimestamp };
+// Exportar instancias y utilidades para el resto de módulos
+export {
+  database,
+  auth,
+  // database API
+  ref,
+  set,
+  get,
+  update,
+  runTransaction,
+  onValue,
+  off,
+  onDisconnect,
+  push,
+  remove,
+  serverTimestamp
+};
