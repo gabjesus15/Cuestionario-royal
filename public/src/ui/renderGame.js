@@ -43,7 +43,7 @@ function bindEvents(root) {
         await startMatch(
           gameState.roomCode,
           toSealedQuestions(DEFAULT_QUESTIONS),
-          30000   // misma duración por pregunta que en el lobby
+          10000   // misma duración por pregunta que en el lobby
         );
         // No hace falta redirigir: la suscripción a /games lo detecta
       } catch (err) {

@@ -116,7 +116,7 @@ function updateTimerDisplay(secondsLeft) {
   const timerEl = document.getElementById('timer');
   if (!timerEl) return;
   timerEl.textContent = secondsLeft;
-  timerEl.className = secondsLeft <= 7 ? 'timer warning' : 'timer';
+  timerEl.className = secondsLeft <= 5 ? 'timer warning' : 'timer';
 }
 
 // ---- limpieza ----
