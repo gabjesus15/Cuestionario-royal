@@ -8,17 +8,13 @@
 </head>
 <body>
   <main class="container">
-    <h1>Partida en curso ⚔️</h1>
-    <p id="info"></p>
-    <a href="./index.html">Volver al lobby</a>
+    <div id="view">
+      <div class="card center">
+        <h1>⚡ Cargando Batalla...</h1>
+        <p>Preparando preguntas épicas</p>
+      </div>
+    </div>
   </main>
-  <script>
-    // Muestra código y jugadores que nos pasan por querystring
-    const params = new URLSearchParams(location.search);
-    const code = params.get('code');
-    const players = params.get('players');
-    document.getElementById('info').textContent =
-      `Sala: ${code} | Jugadores: ${players || '...'}`;
-  </script>
+  <script type="module" src="./js/game.js"></script>
 </body>
 </html>
